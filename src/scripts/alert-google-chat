@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025-2026 Kaptain contributors (Fred Cooke)
+#
+# Google Chat provider for alert. Posts a message of its own to the alert space,
+# which is deliberately separate from the deploy space. Never threaded.
+set -euo pipefail
+
+if [[ $# -eq 0 ]]; then
+  echo "Usage: alert-google-chat <message>" >&2
+  echo "Error: message argument required" >&2
+  exit 42
+fi
+
+message="$*"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=src/scripts/lib/notify-google-chat.bash
+source "${script_dir}/lib/notify-google-chat.bash"
+
+text="$(google_chat_prefix Alert)${message}"
+
+# Alerts interrupt the humans in the space
+mention=$(google_chat_setting googleChatAlertMention)
+google_chat_send googleChatAlertWebhookUrl "" "${mention:+${mention} }${text}"

@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025-2026 Kaptain contributors (Fred Cooke)
+#
+# Validate the Google Chat notify configuration. Webhooks have no call that
+# checks them without posting, so this checks presence and shape only.
+#
+# Failures only block the deploy when googleChatRequired is 'true'. Otherwise
+# they are reported and the deploy carries on, with messages failing quietly.
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=src/scripts/lib/notify-google-chat.bash
+source "${script_dir}/lib/notify-google-chat.bash"
+
+failures=0
+
+fail() {
+  echo "  FAIL: $*" >&2
+  failures=$((failures + 1))
+}
+
+echo "=== Validate Google Chat Notify ==="
+
+webhook_pattern='^https://chat\.googleapis\.com/v1/spaces/[^/?]+/messages\?.*key=.+&token=.+'
+for key in googleChatWebhookUrl googleChatAlertWebhookUrl; do
+  url=$(google_chat_read_key "${NOTIFY_SECRETS_BASE}" "${key}")
+  if [[ -z "${url}" ]]; then
+    fail "${key} not found in ${NOTIFY_SECRETS_BASE}"
+  elif [[ ! "${url}" =~ ${webhook_pattern} ]]; then
+    fail "${key} is not a Google Chat webhook URL (https://chat.googleapis.com/v1/spaces/.../messages?key=...&token=...)"
+  fi
+done
+
+for key in googleChatRequired googleChatSuccessToChannel; do
+  value=$(google_chat_read_key "${NOTIFY_CONFIG_BASE}" "${key}")
+  if [[ -n "${value}" && "${value}" != "true" && "${value}" != "false" ]]; then
+    fail "${key} '${value}' is not true or false"
+  fi
+done
+
+for setting in Retry RetryDelay ConnectTimeout MaxTime RetryMaxTime; do
+  value=$(google_chat_read_key "${NOTIFY_CONFIG_BASE}" "googleChatCurl${setting}")
+  if [[ -n "${value}" && ! "${value}" =~ ^[0-9]+$ ]]; then
+    fail "googleChatCurl${setting} '${value}' is not a whole number"
+  fi
+done
+
+if [[ "${failures}" -eq 0 ]]; then
+  echo "  OK: Google Chat notify configuration"
+  exit 0
+fi
+
+if [[ "$(google_chat_read_key "${NOTIFY_CONFIG_BASE}" googleChatRequired)" == "true" ]]; then
+  echo "Google Chat notify validation failed with ${failures} error(s) and googleChatRequired is true" >&2
+  exit 1
+fi
+
+echo "Google Chat notify validation failed with ${failures} error(s), continuing as googleChatRequired is not true" >&2
